@@ -93,3 +93,9 @@ canvas { width: 100%; height: 120px; margin-top: 10px; border: 1px solid var(--l
 .log { height: 200px; }
 .log .warn { color: #f0a34a; } .log .error { color: #ff7a70; } .log .debug { color: #6b7180; }
 #shellForm input { width: 100%; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-family: var(--mono); }
+
+.widget { background: linear-gradient(135deg, rgba(159,180,255,.28), rgba(159,180,255,.12)); border: 1px solid rgba(159,180,255,.4); border-radius: 12px; padding: 8px 10px; font-size: 11px; }
+.widget b { display: block; font-size: 10px; letter-spacing: .04em; opacity: .85; margin-bottom: 2px; }
+.agent-tasks { flex: 1; min-height: 0; overflow: auto; }
+.agent-widgets { flex: none; }
+.agent-tasks .task { white-space: pre-wrap; }

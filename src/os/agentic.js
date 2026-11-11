@@ -27,6 +27,8 @@ import { Classifier, command as qaCommand, person, answer as qaAnswer } from './
 import { SEEDS } from './agentos/seeds.js';
 import { IntentTable } from './agentos/intents.js';
 import { Ledger } from './agentos/ledger.js';
+import { almanac, COUNTRIES } from './agentos/almanac.js';
+import { Habits } from './agentos/habits.js';
 
 // ---------------------------------------------------------------- tools & tiers (from the crates)
 const T = (tier, desc) => ({ tier, desc });
@@ -56,6 +58,10 @@ export const TOOLS = {
   gst_summary: T('Low', 'GST figures for a period'), file_gst: T('High', 'file a GST return'), bills: T('Low', 'bills due'),
   pay_bill: T('High', 'pay a bill'), wallet: T('Low', 'wallet balance'), pay: T('High', 'pay someone'), orders: T('Low', 'order history'),
   best_price: T('Low', 'compare prices'), buy: T('High', 'buy something'), news: T('Low', 'news'), book: T('High', 'book an event'),
+  // the almanac: answered by code on the phone, per country (src/os/agentos/almanac.js)
+  time_now: T('Low', 'the local time and date'), nakshatra: T('Low', "today's nakshatra and tithi"), panchang: T('Low', 'tithi, nakshatra, vaar, rahu kaal'),
+  rahu_kaal: T('Low', 'rahu kaal today'), vastu: T('Low', 'a vastu tip, by topic or of the day'), hijri_date: T('Low', 'Islamic (Hijri) date'),
+  lunar_date: T('Low', 'Chinese lunar date and zodiac'), feng_shui: T('Low', 'a feng shui tip'), rokuyo: T('Low', 'Japanese era date and rokuyo'),
   // crates/skillpack, crates/docs, crates/apps
   skills: T('Low', 'find guides'), skill: T('Low', 'read part of a guide'), documents: T('Low', 'list documents'), read_document: T('Low', 'answer from a document'),
   weather: T('Low', 'weather'), air_quality: T('Low', 'air quality'), time_in: T('Low', 'local time in a place'), directions: T('Low', 'route between places'),
@@ -89,7 +95,7 @@ const words = t => t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 const normal = t => words(t).join(' ');
 const canonical = a => JSON.stringify({ tool: a.tool, args: Object.fromEntries(Object.entries(a.args || {}).sort()) });
 
-const CTL = new Set(['status', 'stage', 'chat', 'pending', 'press', 'key', 'decline', 'phone', 'models', 'prio', 'power', 'notify',
+const CTL = new Set(['widgets', 'routines', 'show', 'unpin', 'pin', 'habits', 'country', 'status', 'stage', 'chat', 'pending', 'press', 'key', 'decline', 'phone', 'models', 'prio', 'power', 'notify',
   'sim-sms', 'sim-call', 'sim-caller-hangup', 'learn', 'ledger', 'digest', 'state', 'help', 'tools', 'set', 'contacts', 'train']);
 
 export class AgenticOS extends BaseOS {
@@ -104,6 +110,7 @@ export class AgenticOS extends BaseOS {
       approval_hold_ms: 2000, hot_c: 80, cool_c: 70, keep_small_loaded: true, model_wait_secs: 20,
       train_min_new: 20, train_min_battery: 50, train_steps: 60, train_nightly: true, train_enabled: true,
       online: true, low_battery_floor: 15, deep_min_battery: 30, vip: [], startMinute: 9 * 60,
+      startDate: [2026, 10, 11], country: 'IN', followups: 'suggest', // suggest | auto | off
     };
     // Model set from the comments in os/postmarketos/agentd.toml and the install guide.
     const r = s.ramGB;
@@ -131,6 +138,7 @@ export class AgenticOS extends BaseOS {
     this.lastActivity = 0;
     this.trainer = { running: null, trainedOn: 0, lastDay: null, last: null, adapter: null, forced: false };
     this.lastReply = '';
+    this.habits = new Habits({ tierOf: tool => TOOLS[tool]?.tier });
     this.retrain();
   }
 
@@ -275,6 +283,9 @@ export class AgenticOS extends BaseOS {
     if (intent) return this.act(text, intent, 'intent');
     const sc = this.shortcut(text);
     if (sc) return this.act(text, sc, 'shortcut');
+    // simple questions: the nearest phrasing already known, by Jaccard similarity of content words
+    const near = this.habits.match(text);
+    if (near) return this.act(text, near.action, `jaccard ${near.score} ~ "${near.like}"`);
     const decided = this.classifier.decide(text, 0.6);
     if (decided) {
       const [label] = decided;
@@ -360,7 +371,30 @@ export class AgenticOS extends BaseOS {
     if (r.queued) { e.queue = r.queued; e.outcome = 'waiting'; return `not done: ${r.text}${via}`; }
     e.outcome = r.ok ? 'ran' : 'failed';
     this.retrain();
-    return `${r.ok ? 'done' : 'not done'}: ${r.text}${via}`;
+    let out = `${r.ok ? 'done' : 'not done'}: ${r.text}${via}`;
+    if (r.ok) out += this.afterAnswer(prompt, a);
+    return out;
+  }
+
+  /** Learn from a request that worked, then add what usually follows it (a routine, or the country's custom). */
+  afterAnswer(prompt, a) {
+    const lines = [];
+    for (const c of this.habits.observe(this.now, prompt, a)) {
+      this.record(`${c.kind} learned: ${c.text}`);
+      this.log('habits', c.text);
+      lines.push(`  ✱ new ${c.text}`);
+    }
+    const quiet = (tool, args) => this.run({ tool, args: args || {} }, true).text;
+    const r = this.habits.routines.get(a.tool);
+    if (r) {
+      const answers = r.run(quiet).slice(1);
+      r.chain.slice(1).forEach((tool, i) => lines.push(`  + ${answers[i]}   [routine ${r.id}: you usually ask ${tool.replace(/_/g, ' ')} next]`));
+    } else if (this.cfg.followups !== 'off') {
+      const next = (COUNTRIES[this.cfg.country]?.after || {})[a.tool] || [];
+      if (next.length && this.cfg.followups === 'auto') next.forEach(tool => lines.push(`  + ${quiet(tool)}   [${this.cfg.country} custom]`));
+      else if (next.length) lines.push(`  ↪ also ask: ${next.map(x => x.replace(/_/g, ' ')).join(' · ')}`);
+    }
+    return lines.length ? '\n' + lines.join('\n') : '';
   }
 
   /** The gateway: Low/Medium run; High needs a grant for exactly this action (crates/gateway). */
@@ -451,9 +485,11 @@ export class AgenticOS extends BaseOS {
   who(number) { const n = this.nameOf(number); return n ? `${n} (${number})` : number; }
   activeCall() { return this.calls.find(c => c.state === 'active' || c.state === 'dialing'); }
 
-  run(a) {
+  run(a, quiet = false) {
     const g = a.args || {};
-    const R = (ok, text) => { this.record(`${a.tool} ${ok ? 'ok' : 'failed'}`); return { ok, text }; };
+    const R = (ok, text) => { if (!quiet) this.record(`${a.tool} ${ok ? 'ok' : 'failed'}`); return { ok, text }; };
+    const alm = almanac(a.tool, g, this.nowMs(), this.cfg.country);
+    if (alm != null) return R(true, alm);
     if (NETWORK_TOOLS.has(a.tool) && !this.networkUp()) return R(false, 'no network (airplane mode, or no wifi and no data)');
     switch (a.tool) {
       case 'phone_status': return R(true, `operator ${this.cellUp() ? 'Airtel' : 'none'}, signal ${this.cellUp() ? Math.round(this.device.env.signal * 100) : 0}%, data ${this.radio.data && !this.radio.airplane ? 'on' : 'off'}, wifi ${this.radio.wifiSsid && this.device.env.wifiAvailable && !this.radio.airplane ? this.radio.wifiSsid : 'off'}, airplane ${this.radio.airplane ? 'on' : 'off'}`);
@@ -533,6 +569,11 @@ export class AgenticOS extends BaseOS {
   }
 
   // ------------------------------------------------- incoming (the network)
+  /** The phone's wall clock, as epoch milliseconds (start date + start time at the UTC offset + simulated seconds). */
+  nowMs() {
+    const [y, m, d] = this.cfg.startDate;
+    return Date.UTC(y, m, d) + (this.cfg.startMinute - this.cfg.utc_offset_minutes) * 60000 + this.device.clock * 1000;
+  }
   minuteOfDay() { return Math.floor(this.cfg.startMinute + this.device.clock / 60) % 1440; }
   localDay() { return Math.floor((this.cfg.startMinute * 60 + this.device.clock) / 86400); }
   inQuiet(m = this.minuteOfDay()) {
@@ -631,6 +672,8 @@ export class AgenticOS extends BaseOS {
       if (c.state === 'dialing' && this.now - c.t > 6) { c.state = 'active'; c.answered = true; this.wakeLocks.add('call'); this.log('modem', `${this.who(c.number)} answered`); }
       if (c.state === 'ringing' && this.now - c.t > 30) { c.state = 'ended'; c.missed = true; this.announce({ app: 'phone', sender: this.nameOf(c.number) || c.number, text: 'missed call', priority: 'normal' }, 'phone: missed call'); }
     }
+    // widgets: their programs run when the answer they show goes stale (code, not the LLM)
+    for (const w of this.habits.refresh(this.now, (tool, args) => this.run({ tool, args: args || {} }, true).text)) this.log('widget', `${w.id} ${w.title}: ${w.lastText.replace(/\n/g, ' | ')}`, 'debug');
     this.trainTick(dt);
     this.syncModels();
     this.mode = this.baselineMode();
@@ -742,7 +785,9 @@ export class AgenticOS extends BaseOS {
       ledger: this.ledger.lines.length, episodes: this.episodes.length, labelled: this.labelled(),
       trainer: { running: this.trainer.running ? { step: this.trainer.running.step, of: this.cfg.train_steps } : null, last: this.trainer.last, adapter: this.trainer.adapter, blocker: this.trainBlocker() },
       call: this.activeCall() ? this.who(this.activeCall().number) : (this.calls.find(c => c.state === 'ringing') ? `ringing: ${this.who(this.calls.find(c => c.state === 'ringing').number)}` : null),
-      torch: this.radio.torch, airplane: this.radio.airplane, lastReply: this.lastReply,
+      torch: this.radio.torch, airplane: this.radio.airplane, lastReply: this.lastReply, country: this.cfg.country,
+      widgets: this.habits.widgets.filter(w => w.pinned).map(w => ({ id: w.id, title: w.title, text: w.lastText || '', everyS: w.everyS })),
+      routines: [...this.habits.routines.values()].map(r => ({ id: r.id, chain: r.chain })),
     };
   }
 
@@ -754,7 +799,7 @@ export class AgenticOS extends BaseOS {
     const arg = l.slice(cmd.length).trim();
     if (!CTL.has(cmd)) { if (['uname', 'cat', 'uptime', 'free', 'rc-service', 'reboot', 'poweroff'].includes(cmd)) return this.sh(cmd, rest); return this.chat(l); }
     switch (cmd) {
-      case 'help': return 'agentd ctl: status | stage | chat <text> (or just type it) | pending | key [ms] | press N | decline N | phone | contacts | models | prio | power <0-100> [charger] | notify app|sender|low/normal/urgent|text | sim-sms NUMBER|TEXT | sim-call NUMBER | sim-caller-hangup | digest | learn | train | ledger [verify|tamper] | tools | set <key> <value> | state\nshell: uname -a, cat /etc/os-release, uptime, free, rc-service agentd restart, reboot, poweroff';
+      case 'help': return 'agentd ctl: status | stage | chat <text> (or just type it) | pending | key [ms] | press N | decline N | phone | contacts | models | prio | power <0-100> [charger] | notify app|sender|low/normal/urgent|text | sim-sms NUMBER|TEXT | sim-call NUMBER | sim-caller-hangup | digest | learn | train | ledger [verify|tamper] | tools | set <key> <value> | state\nhabits: widgets | routines | show widget N | show routine N | unpin widget N | pin widget N | habits | country [IN|US|GB|DE|CN|JP|SA|AE] | set followups suggest|auto|off\nshell: uname -a, cat /etc/os-release, uptime, free, rc-service agentd restart, reboot, poweroff';
       case 'status': return this.statusLine();
       case 'stage': return this.stage;
       case 'chat': return this.chat(arg);
@@ -797,10 +842,36 @@ export class AgenticOS extends BaseOS {
         const [k, v] = rest;
         if (k === 'ui') { this.settings.ui = v === 'on' || v === 'true'; return `agentos-ui ${this.settings.ui ? 'on' : 'off'}`; }
         if (k === 'vip') { this.cfg.vip.push(rest.slice(1).join(' ')); return `VIP: ${this.cfg.vip.join(', ')}`; }
-        if (k in this.cfg) { this.cfg[k] = typeof this.cfg[k] === 'number' ? Number(v) : v === 'true'; return `${k} = ${this.cfg[k]}`; }
+        if (k in this.cfg) {
+          const cur = this.cfg[k];
+          if (k === 'followups' && !['suggest', 'auto', 'off'].includes(v)) return 'followups: suggest | auto | off';
+          this.cfg[k] = typeof cur === 'number' ? Number(v) : typeof cur === 'boolean' ? (v === 'true' || v === 'on') : v;
+          return `${k} = ${this.cfg[k]}`;
+        }
         return `unknown key ${k}`;
       }
       case 'state': return JSON.stringify(this.extraSnapshot(), null, 2);
+      case 'widgets': return this.habits.widgets.map(w => `[${w.id}] ${w.pinned ? '' : '(unpinned) '}${w.title} · every ${w.everyS} s · v${w.version}\n${(w.lastText || '(not run yet)').replace(/^/gm, '    ')}`).join('\n') || 'no widgets yet: ask the same thing a few times';
+      case 'routines': return [...this.habits.routines.values()].map(r => `[${r.id}] ${r.chain.join(' → ')} (seen ${r.count} times, v${r.version})`).join('\n') || 'no routines yet: ask the same things in the same order a few times';
+      case 'show': {
+        const id = Number(rest[1]);
+        const w = rest[0] === 'widget' ? this.habits.widgets.find(x => x.id === id) : [...this.habits.routines.values()].find(x => x.id === id);
+        return w ? w.source : 'usage: show widget N | show routine N';
+      }
+      case 'unpin': case 'pin': { const w = this.habits.widgets.find(x => x.id === Number(rest.at(-1))); if (!w) return 'no such widget'; w.pinned = cmd === 'pin'; return `widget ${w.id} ${cmd}ned`; }
+      case 'habits': {
+        const pairs = [...this.habits.pairs].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => `  ${k.split('>').join(' → ')}: ${n} session${n === 1 ? '' : 's'}`);
+        return `question bank: ${this.habits.bank.length} phrasings (${this.habits.bank.filter(b => b.learned).length} learned from you)\nmost common sequences:\n${pairs.join('\n') || '  none yet'}`;
+      }
+      case 'country': {
+        const cc = (rest[0] || '').toUpperCase();
+        if (!cc) return `${this.cfg.country} (${COUNTRIES[this.cfg.country].name}); available: ${Object.keys(COUNTRIES).join(' ')}`;
+        if (!COUNTRIES[cc]) return `unknown country ${cc}; available: ${Object.keys(COUNTRIES).join(' ')}`;
+        const off = { IN: 330, US: -300, GB: 0, DE: 60, CN: 480, JP: 540, SA: 180, AE: 240 }[cc];
+        this.cfg.startMinute += off - this.cfg.utc_offset_minutes; // same instant, new local clock
+        this.cfg.utc_offset_minutes = off; this.cfg.country = cc;
+        return `country ${cc} (${COUNTRIES[cc].name}); local time ${this.extraSnapshot().localTime}`;
+      }
     }
     return '';
   }

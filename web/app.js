@@ -152,7 +152,7 @@ function render() {
   const showsClock = !on0 || o.locked; // lock screen / AOD show a big clock but have no buttons
   const key = JSON.stringify([o.state, o.locked, o.screenOn, o.foreground, o.coolDown, o.foreground ? o.fps : 0, showsClock ? clock(snap.t) : '',
     showsClock ? Math.round(snap.hardware.battery?.pct ?? 0) : '', snap.hardware.battery?.charging, dev.os.bootQueue?.[0]?.name, o.notifications.length,
-    o.statusLine, o.pending?.map(p => p.id).join(), o.job?.promptLeft != null, o.models?.map(m => m.state).join(), o.call, chatLog.length, chatLog.at(-1)?.text,
+    o.statusLine, o.pending?.map(p => p.id).join(), o.job?.promptLeft != null, o.models?.map(m => m.state).join(), o.call, chatLog.length, chatLog.at(-1)?.text, o.widgets?.map(w => w.title + w.text).join(),
     [...dev.os.procs.keys()].join(), dev.folded]);
   // status bar & brightness update every frame without touching the content
   const bar = scr.querySelector('.status');
@@ -161,8 +161,9 @@ function render() {
   if (key === screenKey) return;
   if (scr.contains(document.activeElement) && document.activeElement.tagName === 'INPUT' && o.os === 'agentic' && !o.locked && o.state === 'on') {
     // keep the input alive while typing; refresh only the transcript and pending list
-    const fresh = agentView(o).querySelector('.agent-tasks'), cur = scr.querySelector('.agent-tasks');
-    if (fresh && cur) cur.replaceWith(fresh);
+    const view = agentView(o);
+    for (const sel of ['.agent-tasks', '.agent-widgets']) { const fresh = view.querySelector(sel), cur = scr.querySelector(sel); if (fresh && cur) cur.replaceWith(fresh); }
+    const t = scr.querySelector('.agent-tasks'); if (t) t.scrollTop = t.scrollHeight;
     screenKey = key;
     return;
   }
@@ -207,6 +208,7 @@ function render() {
     scr.style.filter = `brightness(${0.45 + 0.55 * (snap.hardware.display.brightness || 0.6)})`;
   }
   scr.replaceChildren(...kids);
+  const t = scr.querySelector('.agent-tasks'); if (t) t.scrollTop = t.scrollHeight;
 }
 
 // agenticOS: what agentd says (status line, pending approvals, the conversation). No app grid.
@@ -217,6 +219,9 @@ function agentView(o) {
   wrap.append(el('div', { style: 'opacity:.8' }, o.settings.ui ? 'agentos-ui' : 'headless · agentd ctl', ` · ${o.stage} · ${o.governor}`),
     el('div', { style: 'opacity:.75' }, (o.models || []).map(m => `${m.name} ${m.state}${m.state === 'ready' ? ` · ${m.tokPerSecGen} tok/s` : ''}`).join(' | ') || 'no model'),
     el('div', { class: 'notif' }, o.statusLine));
+  // widgets the phone wrote for questions asked often: code, refreshed when stale
+  wrap.append(el('div', { class: 'agent-widgets', style: 'display:flex;flex-direction:column;gap:6px' },
+    (o.widgets || []).map(w => el('div', { class: 'widget' }, el('b', {}, `▣ ${w.title}`), el('div', { style: 'white-space:pre-wrap' }, w.text || '…')))));
   const list = el('div', { class: 'agent-tasks' });
   for (const p of o.pending || []) {
     list.append(el('div', { class: 'task' }, el('b', {}, `#${p.id} ${p.tool} `), Object.entries(p.args).map(([k, v]) => `${k}=${v}`).join(' '),

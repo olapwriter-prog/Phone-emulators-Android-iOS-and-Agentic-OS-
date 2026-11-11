@@ -57,6 +57,10 @@ export const PHRASES = [
   ['convert {amount} {from} to {to}', 'convert_currency'], ['tell me about {topic}', 'wiki'], ['define {word}', 'define'],
   ['public holidays in {country}', 'holidays'], ['play {query} radio', 'radio'], ['how to make {dish}', 'recipe'],
   ['translate {text} to {to}', 'translate'], ['{coin} price', 'crypto'],
+  ['what time is it', 'time_now'], ['time', 'time_now'], ['time now', 'time_now'],
+  ["today's nakshatra", 'nakshatra'], ['nakshatra', 'nakshatra'], ['panchang', 'panchang'], ['rahu kaal', 'rahu_kaal'],
+  ['vastu for {topic}', 'vastu'], ['vastu', 'vastu'], ['hijri date', 'hijri_date'], ['lunar date', 'lunar_date'],
+  ['feng shui', 'feng_shui'], ['rokuyo', 'rokuyo'],
   ['list functions', 'list_functions'], ['my functions', 'list_functions'], ['show function {name}', 'show_function'],
 ];
 

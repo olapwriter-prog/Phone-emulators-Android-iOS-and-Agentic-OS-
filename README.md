@@ -19,7 +19,7 @@ You can drive the same engine from a CLI, a browser UI, or as a library. It has
 no dependencies and needs Node 18 or later.
 
 ```bash
-npm test                                   # 50 behaviour tests
+npm test                                   # 59 behaviour tests
 node bin/phonesim.js list                  # the catalog
 node bin/phonesim.js info galaxy-z-fold6
 node bin/phonesim.js shell pixel-9         # interactive device
@@ -123,6 +123,63 @@ agentd Active> ledger verify
 ledger ok: 21 lines, head d14ee2e478b5db7e…
 ```
 
+#### Habits: similar questions, learned routines, widgets (simulator extension)
+
+These add to agentd's routing; they are not in agenticOS yet. They live in
+`src/os/agentos/habits.js` and `almanac.js`, written so they can be ported to Rust. The
+request order becomes: feedback → exact phrase → learned shortcut → **question bank
+(Jaccard)** → classifier → code answers → LLM.
+
+- **Simple questions by Jaccard similarity.** Each phrasing the phone knows is kept as a
+  set of content words, with stop words dropped, light stemming and aliases
+  (`clock` → `time`, `vaastu` → `vastu`). "tell me the time", "whats the time now" and
+  "time please" all reduce to {time}. If a new request scores at least 0.5 against a
+  known phrasing, it runs the same tool with no classifier pass and no LLM. Every request
+  that works is added to the bank.
+- **The almanac, answered by code.** Local time in the country's own format and
+  calendar. In India also nakshatra and pada, tithi, panchang and Rahu kaal; nakshatra
+  and tithi come from a low-precision Moon and Sun ephemeris with Lahiri ayanamsa
+  (checked against Paush Purnima 2024 in Pushya and Diwali 2024 Amavasya in Swati).
+  Vastu guidance by topic, or a tip of the day. Elsewhere: the Chinese lunar date,
+  zodiac and feng shui; the Japanese era date and rokuyō; the Hijri date.
+- **Every country works differently.** `country IN|US|GB|DE|CN|JP|SA|AE` sets the
+  timezone, format and custom. After "what time is it", India follows with
+  nakshatra · vastu, China with lunar date · feng shui, Japan with rokuyō, and Saudi
+  Arabia and the UAE with the Hijri date. `set followups suggest` (the default) offers
+  them, `auto` answers them, `off` drops them.
+- **Routines from what you repeat.** A session is a run of requests at most 5 minutes
+  apart. When the same sequence starts 3 sessions (time → nakshatra → vastu), agentd
+  writes a routine. From then on, asking the first question answers the whole chain,
+  with the arguments you last used ("vastu for kitchen"). Counting only from a session's
+  first request keeps routines from looping.
+- **Widgets for frequent questions.** A question asked 3 times in 7 days becomes a widget.
+  Its content is the routine's chain when there is one, and it refreshes when its answer
+  goes stale: the time every minute, the nakshatra every 30 minutes, vastu daily. It
+  shows on the agentos-ui panel and in `widgets`.
+- **Generated code, read-only.** Routines and widgets are source programs the phone
+  writes (`show routine N`, `show widget N`). They are compiled into a sandbox that can
+  only call Low-tier tools, so a widget can never call, text, pay or post. Each one
+  learned is written to the ledger.
+
+```
+agentd Active> tell me the time
+done: Wednesday, 11 November 2026 at 9:00 am (IST) [jaccard 1 ~ "what is the time"]
+  ↪ also ask: nakshatra · vastu
+  … three mornings of time → nakshatra → vastu for kitchen …
+agentd Active> time
+done: Thursday, 12 November 2026 at 9:04 am (IST) [intent]
+  + Nakshatra Jyeshtha, pada 4 (sidereal Moon 237.39°); tithi Shukla Tritiya   [routine 2: you usually ask nakshatra next]
+  + Vastu (kitchen): Kitchen in the south-east (Agni corner); cook facing east.   [routine 2: you usually ask vastu next]
+agentd Active> show routine 2
+function run(tool) {
+  const out = [];
+  out.push(tool("time_now", {}));
+  out.push(tool("nakshatra", {}));
+  out.push(tool("vastu", {"topic":"kitchen"}));
+  return out;
+}
+```
+
 Other commands: `pending`, `press N`, `decline N`, `phone`, `models`, `prio`,
 `power 80 charger`, `notify app|sender|priority|text`, `sim-call NUMBER`,
 `sim-caller-hangup`, `digest`, `learn`, `train [now]`, `ledger [verify|tamper N]`,
@@ -220,7 +277,8 @@ src/core/hardware.js   battery, thermal RC model, CPU capacity/throttle, power b
 src/core/os-base.js    shared lifecycle, lock and unlock, apps, permissions, notifications, shell
 src/core/device.js     hardware + OS + environment, simulation clock, chargers, fold
 src/os/*.js            android, ios, linux, macos, agentic (agentd) behaviour
-src/os/agentos/        ports of agenticOS crates: understand + qa seeds, intents, ledger
+src/os/agentos/        ports of agenticOS crates (understand + qa seeds, intents, ledger), plus
+                       habits.js (Jaccard bank, routines, widgets) and almanac.js (time, panchang, customs)
 src/devices/catalog.js the 56 models
 src/scenarios.js       repeatable scenarios
 bin/phonesim.js        CLI

@@ -372,13 +372,13 @@ export class BaseOS {
     return {
       on: true, suspended,
       sleepFactor: this.sleepFactor(),
-      cpu, npu: extra.npu || 0,
+      cpu, npu: extra.npu || 0, extraW: extra.extraW || 0,
       perfCap: s.lowPower ? this.lowPowerPerfCap() : 1,
       display: { on: this.screenOn && !!d, brightness, hz, aod: !this.screenOn && this.alwaysOnDisplay() },
       cellOn: s.cellular && !s.airplane && !!this.spec.radios.cellular,
       wifiOn: wifiOk,
       cell: wifiOk ? 0 : net, wifi: wifiOk ? net : 0,
-      gps, bt: s.bluetooth && !s.airplane,
+      gps: gps || !!extra.gps, bt: s.bluetooth && !s.airplane,
     };
   }
 

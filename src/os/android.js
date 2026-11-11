@@ -253,7 +253,7 @@ export class AndroidOS extends BaseOS {
     return {
       'ro.product.model': s.name, 'ro.product.manufacturer': s.vendor,
       'ro.product.device': s.id, 'ro.build.version.release': s.osVersion,
-      'ro.build.version.sdk': { 14: 34, 15: 35, 16: 36 }[s.osVersion] || 35,
+      'ro.build.version.sdk': { 6: 23, 10: 29, 11: 30, 13: 33, 14: 34, 15: 35, 16: 36 }[s.osVersion] || 35,
       'ro.soc.model': s.soc.name, 'ro.boot.verifiedbootstate': 'green',
       'sys.boot_completed': this.state === 'on' || this.state === 'suspended' ? '1' : '0',
       'ro.sf.lcd_density': Math.round(s.display.ppi / 160) * 160 > 0 ? Math.min(640, Math.round(s.display.ppi * 0.9 / 40) * 40) : 420,

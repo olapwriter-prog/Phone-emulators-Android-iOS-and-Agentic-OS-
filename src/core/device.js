@@ -32,7 +32,7 @@ export class Device {
       throw new Error(`${this.spec.name} cannot run ${osId} (supported: ${supportedOS(this.spec).join(', ')})`);
     if (osId !== this.spec.os) {
       // alternative OS: version string comes from the OS, not the stock firmware
-      this.spec = { ...this.spec, os: osId, osVersion: { linux: 'postmarketOS edge', agentic: '1.0', android: 'LineageOS 22' }[osId] || '1.0' };
+      this.spec = { ...this.spec, os: osId, osVersion: { linux: 'postmarketOS edge', agentic: 'agentd on postmarketOS edge', android: 'LineageOS 22' }[osId] || '1.0' };
     }
     this.clock = 0;
     this.events = [];
@@ -133,7 +133,26 @@ export class Device {
     return (b.level * b.capacityWh * b.health) / this.hw.power.totalW;
   }
 
-  exec(line) { return this.os.exec(line); }
+  /**
+   * Run a shell line. When the OS hands back a job (agenticOS asking its LLM), simulated time
+   * advances until the job is done, the way `agentd ctl chat` blocks until it has an answer.
+   */
+  exec(line) {
+    const r = this.os.exec(line);
+    if (r && typeof r === 'object' && r.job) {
+      const j = r.job;
+      this.runUntil(() => this.os.job !== j, 3600, 0.5);
+      return j.reply ?? 'the model is still working';
+    }
+    return r;
+  }
+
+  /** Hold the hardware approval key (volume-down on agenticOS phones) for `ms` milliseconds. */
+  holdKey(ms = 2500) {
+    if (!this.os.approvalKey) return 'this OS has no approval key';
+    this.tick(ms / 1000);
+    return this.os.approvalKey(ms);
+  }
 }
 
 export function createDevice(id, opts) { return new Device(id, opts); }

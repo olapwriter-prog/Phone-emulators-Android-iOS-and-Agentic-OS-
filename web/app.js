@@ -53,12 +53,17 @@ function create() {
   const s = dev.spec;
   const frame = $('#frame');
   frame.className = 'frame ' + (s.family === 'laptop' ? 'laptop' : s.family === 'desktop' ? (s.display ? 'desktop' : 'headless') : '') + (s.display?.cutout === 'homeButton' ? ' homeButton' : '');
-  $('#bioBtn').hidden = !s.biometrics || s.biometrics === 'none';
+  const headless = dev.os.id === 'agentic';
+  $('#bioBtn').hidden = headless || !s.biometrics || s.biometrics === 'none';
+  document.querySelector('[data-act=unlock-pin]').hidden = headless;
+  document.querySelector('[data-act=home]').hidden = headless;
+  $('#keyBtn').hidden = !headless;
+  chatLog.length = 0;
   $('#bioBtn').textContent = s.biometrics === 'face' ? 'Face ID / Face Unlock' : 'Fingerprint';
   $('#foldBtn').hidden = s.family !== 'foldable';
   $('#lidBtn').hidden = !(s.family === 'laptop' && dev.os.closeLid);
   $('#spec').textContent = `${s.vendor} · ${s.year} · ${s.soc.name} · ${s.ramGB} GB RAM · ${s.battery ? `${s.battery.wh} Wh` : 'mains'}${s.display ? ` · ${s.display.diag}" ${s.display.w}×${s.display.h} ${s.display.hz} Hz` : ''}${s.hypothetical ? '\n(hypothetical reference design)' : ''}`;
-  $('#shellHint').textContent = { android: 'adb shell', ios: 'host tools (no on-device shell)', linux: 'bash', macos: 'zsh', agentic: 'agent CLI' }[dev.os.id];
+  $('#shellHint').textContent = { android: 'adb shell', ios: 'host tools (no on-device shell)', linux: 'bash', macos: 'zsh', agentic: 'agentd ctl (or just type a request)' }[dev.os.id];
   term(`${OS_LABEL[dev.os.id]} on ${s.name}. Press ⏻ Power to boot, then try "help".`);
   sizeScreen();
   screenKey = '';
@@ -100,6 +105,7 @@ document.querySelector('.hwbuttons').addEventListener('click', e => {
   const os = dev.os;
   if (os.screenOn) os.touch();
   if (act === 'power') os.pressPower();
+  if (act === 'key') chatLog.push({ who: 'key', text: dev.holdKey(2500) });
   if (act === 'unlock-bio') say(os.unlock({ method: dev.spec.biometrics }));
   if (act === 'unlock-pin') say(os.unlock({ pin: os.pin }));
   if (act === 'home') { os.wake('home'); os.home(); }
@@ -129,7 +135,7 @@ function statusBar(snap) {
   const b = snap.hardware.battery, s = snap.os.settings;
   const sig = s.airplane ? '✈' : dev.spec.radios.cellular && s.cellular ? '▂▄▆█'.slice(0, Math.max(1, Math.round(dev.env.signal * 4))) : '';
   return el('div', { class: 'status' },
-    el('span', {}, clock(snap.t)),
+    el('span', {}, snap.os.localTime || clock(snap.t)),
     el('span', {}, `${sig} ${s.wifi && dev.env.wifiAvailable && !s.airplane ? 'Wi-Fi' : ''} ${b ? `${Math.round(b.pct)}%${b.charging ? '⚡' : ''}` : ''}`));
 }
 
@@ -146,14 +152,15 @@ function render() {
   const showsClock = !on0 || o.locked; // lock screen / AOD show a big clock but have no buttons
   const key = JSON.stringify([o.state, o.locked, o.screenOn, o.foreground, o.coolDown, o.foreground ? o.fps : 0, showsClock ? clock(snap.t) : '',
     showsClock ? Math.round(snap.hardware.battery?.pct ?? 0) : '', snap.hardware.battery?.charging, dev.os.bootQueue?.[0]?.name, o.notifications.length,
-    o.tasks, o.inference, [...dev.os.procs.keys()].join(), dev.folded]);
+    o.statusLine, o.pending?.map(p => p.id).join(), o.job?.promptLeft != null, o.models?.map(m => m.state).join(), o.call, chatLog.length, chatLog.at(-1)?.text,
+    [...dev.os.procs.keys()].join(), dev.folded]);
   // status bar & brightness update every frame without touching the content
   const bar = scr.querySelector('.status');
   if (bar && on0 && o.state === 'on') bar.replaceWith(statusBar(snap));
   if (on0 && o.state === 'on') scr.style.filter = `brightness(${0.45 + 0.55 * (snap.hardware.display.brightness || 0.6)})`;
   if (key === screenKey) return;
   if (scr.contains(document.activeElement) && document.activeElement.tagName === 'INPUT' && o.os === 'agentic' && !o.locked && o.state === 'on') {
-    // keep the agent input alive while typing; refresh only the task list
+    // keep the input alive while typing; refresh only the transcript and pending list
     const fresh = agentView(o).querySelector('.agent-tasks'), cur = scr.querySelector('.agent-tasks');
     if (fresh && cur) cur.replaceWith(fresh);
     screenKey = key;
@@ -163,7 +170,8 @@ function render() {
   const kids = [];
   const cut = dev.hw.activeDisplay?.cutout;
   if (cut && ['notch', 'island', 'punch'].includes(cut)) kids.push(el('div', { class: `cutout ${cut}` }));
-  const on = o.state === 'booting' || ((o.state === 'on') && (o.screenOn || !dev.spec.display));
+  // agenticOS is headless: the panel stands for `agentd ctl` over SSH, or agentos-ui when switched on
+  const on = o.state === 'booting' || ((o.state === 'on') && (o.screenOn || !dev.spec.display || o.os === 'agentic'));
 
   if (!on) {
     const aod = o.state !== 'off' && dev.hw.activeDisplay?.aod && dev.os.alwaysOnDisplay?.();
@@ -173,7 +181,7 @@ function render() {
   } else if (o.state === 'booting') {
     const stage = dev.os.bootQueue[0]?.name || '';
     kids.push(el('div', { class: 'content' }, el('div', { class: 'center' },
-      el('div', { style: `font-size:40px;color:${OS_ACCENT[o.os]}` }, { android: '🤖', ios: '', linux: '🐧', macos: '', agentic: '◎' }[o.os]),
+      el('div', { style: `font-size:40px;color:${OS_ACCENT[o.os]}` }, { android: '🤖', ios: '', linux: '🐧', macos: '', agentic: '⌁' }[o.os]),
       el('div', {}, `${o.label} ${o.version}`), el('div', { class: 'boot-stage' }, stage))));
   } else {
     kids.push(statusBar(snap));
@@ -201,23 +209,35 @@ function render() {
   scr.replaceChildren(...kids);
 }
 
+// agenticOS: what agentd says (status line, pending approvals, the conversation). No app grid.
+const chatLog = [];
 function agentView(o) {
-  const wrap = el('div', { style: 'display:flex;flex-direction:column;gap:8px;flex:1;min-height:0' });
-  wrap.append(el('div', { style: 'font-size:11px;opacity:.75' }, `${o.model.name} · ${o.model.accel} · ${o.inference === 'idle' ? 'idle' : 'thinking (' + o.inference + ')'}`));
+  const wrap = el('div', { style: 'display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;font-size:11px' });
+  const small = o.models?.[0];
+  wrap.append(el('div', { style: 'opacity:.8' }, o.settings.ui ? 'agentos-ui' : 'headless · agentd ctl', ` · ${o.stage} · ${o.governor}`),
+    el('div', { style: 'opacity:.75' }, (o.models || []).map(m => `${m.name} ${m.state}${m.state === 'ready' ? ` · ${m.tokPerSecGen} tok/s` : ''}`).join(' | ') || 'no model'),
+    el('div', { class: 'notif' }, o.statusLine));
   const list = el('div', { class: 'agent-tasks' });
-  for (const t of [...o.tasks].reverse()) {
-    const [a, b] = t.progress.split('/').map(Number);
-    const row = el('div', { class: 'task' }, el('b', {}, `#${t.id} ${t.goal}`), el('div', {}, `${t.status}${t.step ? ' · ' + t.step : ''}${t.note ? ' · ' + t.note : ''}`),
-      el('div', { class: 'bar2' }, el('span', { style: `width:${(a / b) * 100}%` })));
-    if (t.status === 'awaiting-approval') row.append(
-      el('button', { type: 'button', onclick: () => { say(dev.os.approve(t.id)); render(); } }, 'Approve'),
-      el('button', { type: 'button', onclick: () => { dev.os.deny(t.id); render(); } }, 'Deny'));
-    list.append(row);
+  for (const p of o.pending || []) {
+    list.append(el('div', { class: 'task' }, el('b', {}, `#${p.id} ${p.tool} `), Object.entries(p.args).map(([k, v]) => `${k}=${v}`).join(' '),
+      el('div', {}, el('button', { type: 'button', onclick: () => { chatLog.push({ who: 'key', text: dev.holdKey(2500) }); render(); } }, 'Hold volume-down 2 s'),
+        el('button', { type: 'button', onclick: () => { chatLog.push({ who: 'ctl', text: dev.exec(`press ${p.id}`) }); render(); } }, `press ${p.id}`),
+        el('button', { type: 'button', onclick: () => { chatLog.push({ who: 'ctl', text: dev.exec(`decline ${p.id}`) }); render(); } }, 'decline'))));
   }
-  if (!o.tasks.length) list.append(el('div', { class: 'center', style: 'opacity:.7' }, 'Ask for anything.', el('div', { style: 'font-size:11px' }, 'e.g. "summarize the news, then email it to Alex"')));
-  const input = el('input', { placeholder: 'Ask the agent…' });
-  input.addEventListener('input', () => dev.os.touch());
-  const form = el('form', { class: 'agent-input', onsubmit: e => { e.preventDefault(); if (input.value.trim()) { say(dev.os.submit(input.value.trim())); input.value = ''; render(); } } }, input);
+  if (o.call) list.append(el('div', { class: 'task' }, `📞 ${o.call}`));
+  for (const m of chatLog.slice(-8)) {
+    if (m.job && m.job.reply) { m.text = m.job.reply; m.job = null; }
+    list.append(el('div', { class: 'task', style: m.who === 'you' ? 'background:rgba(159,180,255,.25)' : '' }, el('b', {}, m.who === 'you' ? 'you: ' : 'agentd: '), m.job ? `thinking on ${m.job.model}… ${Math.max(0, Math.round(m.job.promptLeft))} prompt + ${Math.max(0, Math.round(m.job.outLeft))} answer tokens left` : m.text));
+  }
+  if (!chatLog.length) list.append(el('div', { class: 'center', style: 'opacity:.7' }, 'Say something.', el('div', {}, 'e.g. "save Mum as +919876543210", then "call mum"')));
+  const input = el('input', { placeholder: 'call mum · text mum running late · signal · how many texts did Mum send me' });
+  const form = el('form', { class: 'agent-input', onsubmit: e => {
+    e.preventDefault(); const t = input.value.trim(); if (!t) return;
+    chatLog.push({ who: 'you', text: t });
+    const r = dev.os.exec(t);
+    chatLog.push(r && r.job ? { who: 'agentd', job: r.job, text: '' } : { who: 'agentd', text: String(r) });
+    input.value = ''; render();
+  } }, input);
   wrap.append(list, form);
   return wrap;
 }
@@ -240,7 +260,9 @@ function metrics(snap) {
     ...(o.memoryPressure ? [['Mem pressure', `${o.memoryPressure}${o.swapMB ? ` · swap ${o.swapMB}MB` : ''}`, o.memoryPressure === 'critical' ? 'err' : '']] : []),
     ...(o.fanPct != null && dev.spec.cooling === 'fan' ? [['Fan', `${o.fanPct}%`, '']] : []),
     ...(o.killSwitches && Object.keys(o.killSwitches).length ? [['Kill switches', Object.entries(o.killSwitches).map(([k, v]) => `${k}:${v ? 'on' : 'off'}`).join(' '), '']] : []),
-    ...(o.model ? [['Model', `${o.model.params} · ${Math.round(o.model.tps)} tok/s`, ''], ['NPU', `${h.power.npuW.toFixed(2)} W`, '']] : []),
+    ...(o.stage ? [['agentd stage', o.stage, ''], ['Governor', o.governor, o.governor === 'powersave' ? 'warn' : ''], ['Pending', String(o.pending.length), o.pending.length ? 'warn' : ''],
+      ['Hottest zone', `${o.dieC} °C${o.hot ? ' HOT' : ''}`, o.hot ? 'err' : ''], ['Local time', `${o.localTime}${o.quiet ? ' (quiet)' : ''}`, ''], ['Ledger', `${o.ledger} lines`, ''],
+      ['Learned', `${o.labelled} confirmed`, ''], ['Training', o.trainer.running ? `step ${o.trainer.running.step}/${o.trainer.running.of}` : (o.trainer.blocker || 'ready'), '']] : []),
   ];
   $('#metrics').replaceChildren(...items.map(([k, v, cls]) => el('div', { class: `metric ${cls}` }, el('small', {}, k), el('b', {}, v))));
 }
@@ -287,3 +309,6 @@ function frame(now) {
 fillOS();
 create();
 requestAnimationFrame(frame);
+
+// A pointer over the screen is a person using the phone: keep it from auto-locking at high speeds.
+for (const ev of ['pointermove', 'pointerdown']) $('#screen').addEventListener(ev, () => { if (dev?.os.screenOn) dev.os.touch(); });

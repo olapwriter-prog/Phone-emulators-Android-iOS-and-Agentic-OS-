@@ -3,7 +3,8 @@
 // `perf` is a relative multi-core index, not a benchmark result.
 
 const SOC = {
-  // name: [perf, peakW, idleW, perfCores, effCores, npuTokensPerSec]
+  // name: [perf, peakW, idleW, perfCores, effCores, npuTokensPerSec, armDot]
+  // armDot: the integer kernel agentos-llm can use: 'i8mm' (SMMLA), 'sdot', or 'none' (portable code)
   'A14 Bionic':        [4.7, 6.0, 0.08, 2, 4, 0],
   'A15 Bionic':        [5.3, 6.2, 0.08, 2, 4, 0],
   'A16 Bionic':        [6.6, 6.5, 0.08, 2, 4, 0],
@@ -34,14 +35,23 @@ const SOC = {
   'M3 Max':              [21.0, 90, 1.2, 12, 4, 70],
   'M2 Max':              [14.8, 80, 1.5, 8, 4, 55],
   'M4':                  [14.7, 35, 0.6, 4, 6, 45],
-  'Agentic N1':          [8.0, 7.0, 0.08, 2, 6, 45],
-  'Agentic N1 Lite':     [2.5, 3.0, 0.05, 2, 2, 12],
+  'Snapdragon 845':      [2.6, 5.5, 0.10, 4, 4, 0, 'sdot'],
+  'Snapdragon 750G':     [2.3, 5.0, 0.09, 2, 6, 0, 'sdot'],
+  'Snapdragon 410':      [0.35, 2.5, 0.10, 0, 4, 0, 'none'],
 };
+
+// Cortex-A510/A710 and later have i8mm; A55/A75/A76-class have SDOT; A53/A72-only chips neither.
+function defaultDot(name) {
+  if (/Allwinner|Rockchip|NXP|Snapdragon 410/.test(name)) return 'none';
+  if (/^(A1\d|M\d)/.test(name)) return 'i8mm';
+  if (/8 Gen [23]|8 Elite|Tensor G[345]|Exynos 1480|8\+ Gen 1/.test(name)) return 'i8mm';
+  return 'sdot';
+}
 
 function soc(name) {
   const s = SOC[name];
   if (!s) throw new Error(`Unknown SoC ${name}`);
-  return { name, perf: s[0], peakW: s[1], idleW: s[2], perfCores: s[3], effCores: s[4], npuTps: s[5] };
+  return { name, perf: s[0], peakW: s[1], idleW: s[2], perfCores: s[3], effCores: s[4], npuTps: s[5], armDot: s[6] || defaultDot(name) };
 }
 
 // display: [diagIn, w, h, maxHz, minHz, type, cutout]
@@ -72,8 +82,7 @@ const iphone = (id, name, year, osV, display, s, ram, mAh, charge, radios, extra
   phone(id, name, 'Apple', year, 'ios', osV, display, s, ram, mAh, charge, radios,
     { biometrics: 'face', ...extra });
 const android = (id, name, vendor, year, osV, display, s, ram, mAh, charge, radios, extra = {}) =>
-  phone(id, name, vendor, year, 'android', osV, display, s, ram, mAh, charge, radios,
-    { altOS: ['agentic'], ...extra });
+  phone(id, name, vendor, year, 'android', osV, display, s, ram, mAh, charge, radios, extra);
 
 function mac(id, name, year, family, display, socName, ramGB, wh, extra = {}) {
   return {
@@ -109,7 +118,7 @@ export const DEVICES = [
   iphone('iphone-17-pro-max', 'iPhone 17 Pro Max', 2025, '26', [6.9, 1320, 2868, 120, 1, 'oled', 'island'], 'A19 Pro', 12, 5088, [40, 25, 'USB-C'], ['5g', '7', 1, 1], { massG: 233, cooling: 'vapor', display: { aod: true } }),
 
   // ------------------------------------------------------------ Android
-  android('pixel-6', 'Pixel 6', 'Google', 2021, '15', [6.4, 1080, 2400, 90, 60, 'oled', 'punch'], 'Tensor', 8, 4614, [21, 21, 'USB-C'], ['5g', '6e'], { massG: 207, altOS: ['linux', 'agentic'] }),
+  android('pixel-6', 'Pixel 6', 'Google', 2021, '15', [6.4, 1080, 2400, 90, 60, 'oled', 'punch'], 'Tensor', 8, 4614, [21, 21, 'USB-C'], ['5g', '6e'], { massG: 207, altOS: ['linux'] }),
   android('pixel-7', 'Pixel 7', 'Google', 2022, '16', [6.3, 1080, 2400, 90, 60, 'oled', 'punch'], 'Tensor G2', 8, 4355, [20, 20, 'USB-C'], ['5g', '6e'], { massG: 197 }),
   android('pixel-8', 'Pixel 8', 'Google', 2023, '16', [6.2, 1080, 2400, 120, 60, 'oled', 'punch'], 'Tensor G3', 8, 4575, [27, 18, 'USB-C'], ['5g', '7'], { massG: 187 }),
   android('pixel-8a', 'Pixel 8a', 'Google', 2024, '16', [6.1, 1080, 2400, 120, 60, 'oled', 'punch'], 'Tensor G3', 8, 4492, [18, 7.5, 'USB-C'], ['5g', '6e'], { massG: 188 }),
@@ -137,13 +146,13 @@ export const DEVICES = [
 
   // -------------------------------------------------------------- Linux
   phone('pinephone', 'PinePhone', 'Pine64', 2020, 'linux', 'postmarketOS 24.12', [5.95, 720, 1440, 60, 60, 'lcd', 'none'], 'Allwinner A64', 3, 3000, [15, 0, 'USB-C'], ['4g', '4'],
-    { biometrics: 'none', massG: 185, removableBattery: true, more: { killSwitches: ['modem', 'wifi', 'mic', 'camera'], distro: { name: 'postmarketOS', shell: 'Phosh', kernel: '6.12.9-postmarketos-allwinner' } } }),
+    { biometrics: 'none', massG: 185, removableBattery: true, altOS: ['agentic'], more: { killSwitches: ['modem', 'wifi', 'mic', 'camera'], distro: { name: 'postmarketOS', shell: 'Phosh', kernel: '6.12.9-postmarketos-allwinner' } } }),
   phone('pinephone-pro', 'PinePhone Pro', 'Pine64', 2022, 'linux', 'postmarketOS 24.12', [6.0, 720, 1440, 60, 60, 'lcd', 'none'], 'Rockchip RK3399S', 4, 3000, [15, 0, 'USB-C'], ['4g', '5'],
-    { biometrics: 'none', massG: 215, removableBattery: true, more: { killSwitches: ['modem', 'wifi', 'mic', 'camera'], distro: { name: 'postmarketOS', shell: 'Phosh', kernel: '6.12.9-postmarketos-rockchip' } } }),
+    { biometrics: 'none', massG: 215, removableBattery: true, altOS: ['agentic'], more: { killSwitches: ['modem', 'wifi', 'mic', 'camera'], distro: { name: 'postmarketOS', shell: 'Phosh', kernel: '6.12.9-postmarketos-rockchip' } } }),
   phone('librem-5', 'Librem 5', 'Purism', 2020, 'linux', 'PureOS 10 (Byzantium)', [5.7, 720, 1440, 60, 60, 'lcd', 'none'], 'NXP i.MX 8M Quad', 3, 4500, [18, 0, 'USB-C'], ['4g', '4'],
-    { biometrics: 'none', massG: 263, removableBattery: true, more: { killSwitches: ['modem', 'wifi', 'mic', 'camera'], distro: { name: 'PureOS', shell: 'Phosh', kernel: '6.6.0-1-librem5' } } }),
+    { biometrics: 'none', massG: 263, removableBattery: true, altOS: ['agentic'], more: { killSwitches: ['modem', 'wifi', 'mic', 'camera'], distro: { name: 'PureOS', shell: 'Phosh', kernel: '6.6.0-1-librem5' } } }),
   phone('volla-x23', 'Volla Phone X23', 'Volla', 2023, 'linux', 'Ubuntu Touch 20.04 OTA-7', [6.1, 720, 1560, 60, 60, 'lcd', 'punch'], 'Helio G99', 6, 5000, [18, 15, 'USB-C'], ['4g', '5'],
-    { massG: 280, removableBattery: true, altOS: ['agentic'], more: { distro: { name: 'Ubuntu Touch', shell: 'Lomiri', kernel: '4.19.191-halium' } } }),
+    { massG: 280, removableBattery: true, more: { distro: { name: 'Ubuntu Touch', shell: 'Lomiri', kernel: '4.19.191-halium' } } }),
 
   // -------------------------------------------------------------- macOS
   mac('macbook-air-13-m2', 'MacBook Air 13" (M2)', 2022, 'laptop', [13.6, 2560, 1664, 60, 60, 'lcd', 'notch'], 'M2', 8, 52.6, { cooling: 'passive', massG: 1240, chargeW: 67, altOS: ['linux'] }),
@@ -155,16 +164,19 @@ export const DEVICES = [
   mac('mac-mini-m4', 'Mac mini (M4)', 2024, 'desktop', null, 'M4', 16, null, { massG: 670, biometrics: 'none' }),
   mac('mac-studio-m2-max', 'Mac Studio (M2 Max)', 2023, 'desktop', null, 'M2 Max', 32, null, { massG: 2700, biometrics: 'none', altOS: ['linux'] }),
 
-  // ---------------------------------------------- Agentic (hypothetical)
-  // No shipping "Agentic OS" phones exist; these are reference designs used
-  // to exercise the agent runtime on different hardware envelopes.
-  phone('agentic-one', 'Agentic One (reference)', 'Reference', 2026, 'agentic', '1.0', [6.4, 1200, 2670, 120, 1, 'oled', 'punch'], 'Agentic N1', 16, 5000, [45, 15, 'USB-C'], ['5g', '7', 1, 1],
-    { massG: 198, cooling: 'vapor', display: { aod: true }, more: { hypothetical: true } }),
-  phone('agentic-pocket', 'Agentic Pocket (reference, compact)', 'Reference', 2026, 'agentic', '1.0', [3.4, 720, 748, 60, 60, 'oled', 'none'], 'Agentic N1 Lite', 6, 1800, [15, 5, 'USB-C'], ['4g', '6'],
-    { massG: 95, more: { hypothetical: true } }),
+  // ------------------------------------- phones agenticOS lists as well supported
+  // docs/INSTALL-postmarketos.md: PinePhone, PinePhone Pro, OnePlus 6/6T, Pocophone F1,
+  // Fairphone 4/5, Samsung Galaxy A3/A5 (2015). Shipped with Android; flash postmarketOS
+  // (ui=none) plus agentd. Older ones run their final stock Android version here.
+  android('oneplus-6', 'OnePlus 6', 'OnePlus', 2018, '11', [6.28, 1080, 2280, 60, 60, 'oled', 'notch'], 'Snapdragon 845', 8, 3300, [20, 0, 'USB-C'], ['4g', '5'], { massG: 177, altOS: ['linux', 'agentic'] }),
+  android('oneplus-6t', 'OnePlus 6T', 'OnePlus', 2018, '11', [6.41, 1080, 2340, 60, 60, 'oled', 'notch'], 'Snapdragon 845', 8, 3700, [20, 0, 'USB-C'], ['4g', '5'], { massG: 185, altOS: ['linux', 'agentic'] }),
+  android('pocophone-f1', 'Pocophone F1', 'Xiaomi', 2018, '10', [6.18, 1080, 2246, 60, 60, 'lcd', 'notch'], 'Snapdragon 845', 6, 4000, [18, 0, 'USB-C'], ['4g', '5'], { massG: 182, cooling: 'vapor', altOS: ['linux', 'agentic'] }),
+  android('fairphone-4', 'Fairphone 4', 'Fairphone', 2021, '13', [6.3, 1080, 2340, 60, 60, 'lcd', 'notch'], 'Snapdragon 750G', 8, 3905, [20, 0, 'USB-C'], ['5g', '5'], { massG: 225, removableBattery: true, altOS: ['linux', 'agentic'] }),
+  android('galaxy-a5-2015', 'Galaxy A5 (2015)', 'Samsung', 2014, '6', [5.0, 720, 1280, 60, 60, 'oled', 'homeButton'], 'Snapdragon 410', 2, 2300, [10, 0, 'micro-USB'], ['4g', '4'], { massG: 123, altOS: ['linux', 'agentic'] }),
+  android('galaxy-a3-2015', 'Galaxy A3 (2015)', 'Samsung', 2014, '6', [4.5, 540, 960, 60, 60, 'oled', 'homeButton'], 'Snapdragon 410', 1, 1900, [10, 0, 'micro-USB'], ['4g', '4'], { massG: 110, altOS: ['linux', 'agentic'] }),
 ];
 
-export const OS_LABEL = { android: 'Android', ios: 'iOS', linux: 'Linux', macos: 'macOS', agentic: 'Agentic OS' };
+export const OS_LABEL = { android: 'Android', ios: 'iOS', linux: 'Linux', macos: 'macOS', agentic: 'agenticOS' };
 
 export function getSpec(id) {
   const s = DEVICES.find(d => d.id === id);

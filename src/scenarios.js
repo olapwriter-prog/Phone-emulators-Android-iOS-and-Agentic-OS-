@@ -27,8 +27,8 @@ export const SCENARIOS = {
     run(d) {
       d.hw.battery.level = 1;
       bootAndUnlock(d);
-      const msgs = appOfKind(d, 'messages');
-      if (msgs) { d.os.launch(msgs); d.os.home(); }
+      const msgs = appOfKind(d, 'messages') || (d.os.id === 'agentic' ? 'sms' : null);
+      if (msgs && d.os.apps[msgs]) { d.os.launch(msgs); d.os.home(); }
       d.os.screenOff('power button');
       const start = d.hw.battery.level;
       for (let h = 0; h < 24 && d.os.state !== 'off'; h++) {
@@ -55,6 +55,7 @@ export const SCENARIOS = {
       d.os.set('autoBrightness', false); d.os.set('brightness', 0.5);
       d.os.settings.autoLockSec = 0;
       const app = appOfKind(d, 'video') || appOfKind(d, 'browser');
+      if (!app) return { skipped: 'headless OS: no video player' };
       d.os.launch(app);
       const hours = d.runUntil(x => x.os.state !== 'on', 30 * 3600, 30) / 3600;
       return { app, hours: +hours.toFixed(2), endState: d.os.state, batteryPowered: d.hw.battery.present, lowPowerKickedIn: d.events.some(e => /Low Power|Battery Saver|energy governor/.test(e.msg)) };
@@ -109,6 +110,7 @@ export const SCENARIOS = {
     describe: 'Open every app one after another; see what the OS kills, freezes or swaps',
     run(d) {
       bootAndUnlock(d);
+      if (!Object.keys(d.os.apps).length) return { skipped: 'headless OS: no apps to open' };
       const killed = [];
       const off = d.on(e => { if (/killed|evicted|jetsam|lmkd|Out of memory/.test(e.msg)) killed.push(e.msg); });
       for (const id of Object.keys(d.os.apps)) { d.os.launch(id); d.run(15, 1); }
@@ -119,31 +121,64 @@ export const SCENARIOS = {
   },
 
   agent: {
-    describe: 'Agentic OS: a mixed batch of goals incl. one needing approval',
+    describe: 'agenticOS (agentd): code-first routing, the approval key, the LLM fallback, the ledger',
     run(d) {
-      if (d.os.id !== 'agentic') return { skipped: 'Agentic OS only' };
-      d.hw.battery.level = 0.9;
-      bootAndUnlock(d);
-      const a = d.os.submit('summarize the news about battery tech').task;
-      const b = d.os.submit('text Sam that I am running late').task;
-      const c = d.os.submit('clean up old screenshots', { priority: 'low' }).task;
-      let peakNpuW = 0;
-      const run = s => { for (let i = 0; i < s * 2; i++) { d.tick(0.5); peakNpuW = Math.max(peakNpuW, d.hw.power.npuW); } };
-      run(120);
-      const waiting = b.status;
-      const lockedApprove = d.os.locked ? d.os.approve(b.id).msg : null; // screen auto-locked meanwhile
-      d.os.unlock({ pin: d.os.pin });
-      d.os.approve(b.id);
-      run(60);
-      const cleanupWaiting = c.status;
-      d.os.deny(c.id);
-      run(10);
+      if (d.os.id !== 'agentic') return { skipped: 'agenticOS only' };
+      d.hw.battery.level = 0.8;
+      d.os.boot();
+      d.runUntil(x => x.os.state === 'on', 300, 0.25);
+      const warmS = d.runUntil(x => x.os.snapshot().models.every(m => m.state === 'ready'), 3 * 3600, 1);
+      const say = l => d.exec(l);
+      say('save Mum as +919876543210');
+      const asked = say('call mum');
+      const shortPress = d.holdKey(300);
+      const hold = d.holdKey(2500);
+      const dialled = say('call mum');
+      say('hang up');
+      say('sim-sms +919876543210|dinner at 8?');
+      const t0 = d.clock;
+      const byCode = say('how many texts did Mum send me');
+      const codeS = d.clock - t0;
+      const t1 = d.clock;
+      const byModel = say('how is the network');
+      const modelS = d.clock - t1;
+      say('text mum late'); say('text mum very late');
+      const twoWaiting = d.holdKey(2500);
+      let ledgerOk; try { d.os.ledger.verify(); ledgerOk = true; } catch { ledgerOk = false; }
       return {
-        model: d.os.model.name, accel: d.os.model.accel, tokPerSec: Math.round(d.os.model.tps),
-        summarize: a.status, summarizeSeconds: a.finished ? Math.round(a.finished - a.created) : null,
-        messageBeforeApproval: waiting, approveWhileLocked: lockedApprove, messageAfter: b.status,
-        cleanupBeforeDeny: cleanupWaiting, cleanup: c.status,
-        auditEntries: d.os.audit.length, peakNpuW: +peakNpuW.toFixed(2),
+        models: d.os.snapshot().models.map(m => m.name).join('+'), warmUpS: Math.round(warmS),
+        approvalAsked: /approval required/.test(asked), shortPress, hold, dialledAfterKey: /^done: calling/.test(dialled),
+        codeAnswer: byCode, codeAnswerS: +codeS.toFixed(1), modelAnswer: byModel.slice(0, 40), modelAnswerS: Math.round(modelS),
+        keyWithTwoWaiting: twoWaiting, ledgerLines: d.os.ledger.lines.length, ledgerOk,
+      };
+    },
+  },
+
+  overnight: {
+    describe: 'agenticOS: a night on the charger: Deep stage, large model, nightly training, held texts and the digest',
+    run(d) {
+      if (d.os.id !== 'agentic') return { skipped: 'agenticOS only' };
+      d.hw.battery.level = 0.35;
+      d.os.cfg.startMinute = 21 * 60 + 30; // 21:30
+      d.os.boot();
+      d.runUntil(x => x.os.state === 'on', 300, 0.25);
+      d.exec('save Mum as +919876543210');
+      for (const t of ['torch on', 'volume 40', 'signal', 'missed calls']) d.exec(t);
+      d.exec('call mum'); d.holdKey(); d.exec('call mum'); d.exec('hang up');
+      d.plug('usb-pd-20w');
+      const stages = new Set();
+      let held = 0, trainingStarted = null;
+      for (let i = 0; i < 10 * 360; i++) {
+        d.tick(10);
+        stages.add(d.os.stage);
+        if (i === 360) { d.exec('sim-sms +918000000005|late night promo'); held = d.os.held.length; d.exec('sim-call +918000000006'); }
+        if (d.os.trainer.running && trainingStarted == null) trainingStarted = d.os.snapshot().localTime;
+      }
+      const snap = d.os.snapshot();
+      return {
+        stages: [...stages].join('>'), models: snap.models.map(m => `${m.name}:${m.state}`).join(' '),
+        heldDuringQuietHours: held, morningDigest: d.exec('digest').split('\n').length,
+        trainingStarted, training: snap.trainer.last, batteryPct: Math.round(d.hw.battery.level * 100), peakDieC: snap.dieC,
       };
     },
   },

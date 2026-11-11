@@ -69,7 +69,7 @@ function parseDuration(s) {
 function statusLine(d) {
   const s = d.snapshot(), b = s.hardware.battery, o = s.os;
   const bat = b ? `${b.pct.toFixed(1)}%${b.charging ? ' ⚡' : b.external ? ' (plugged)' : ''}` : 'AC';
-  const extra = o.doze ? ` doze=${o.doze}` : o.memoryPressure ? ` mem=${o.memoryPressure}` : o.inference ? ` ai=${o.inference}` : '';
+  const extra = o.doze ? ` doze=${o.doze}` : o.memoryPressure ? ` mem=${o.memoryPressure}` : o.stage ? ` | agentd ${o.stage} ${o.localTime}${o.pending.length ? ` pending=${o.pending.length}` : ""}` : "";
   return `[t=${fmtT(s.t)}] ${o.label} ${o.state}${o.locked ? ' 🔒' : ''}${o.screenOn ? ' screen-on' : ''} | bat ${bat} | ${s.hardware.tempC.toFixed(1)}°C ${o.thermalState} | ${s.hardware.power.totalW.toFixed(2)} W | fg=${o.foreground || '-'} | ${o.powerMode}${extra}`;
 }
 const fmtT = t => t < 120 ? `${t.toFixed(0)}s` : t < 7200 ? `${(t / 60).toFixed(1)}m` : `${(t / 3600).toFixed(2)}h`;
@@ -85,6 +85,7 @@ const META_HELP = `hardware / simulation commands:
   :env key=value ...         ambientC, lux, signal, wifiAvailable, moving, sunW, externalDisplay
   :set <setting> <value>     OS setting (see :settings)
   :fold | :unfold            foldables       :lid open|close   laptops (macOS)
+  :key [ms]                  hold the approval key (agenticOS: volume-down, 2000 ms to approve)
   :events [n]                recent log       :watch on|off    stream log lines
   :quit`;
 
@@ -119,6 +120,7 @@ function meta(d, line, ctx) {
     case 'settings': return JSON.stringify(os.settings, null, 2);
     case 'fold': return r(d.fold(true));
     case 'unfold': return r(d.fold(false));
+    case 'key': return d.holdKey(a[0] ? Number(a[0]) : 2500);
     case 'lid': return os.closeLid ? r(a[0] === 'close' ? os.closeLid() : os.openLid()) : 'no lid on this device';
     case 'events': return d.events.slice(-(Number(a[0]) || 20)).map(fmtEvent).join('\n');
     case 'watch': ctx.watch = a[0] !== 'off'; return `watch ${ctx.watch ? 'on' : 'off'}`;
@@ -142,7 +144,7 @@ async function shell(id) {
     if (o.id === 'android') return `${d.spec.id}:/ $ `;
     if (o.id === 'linux') return `user@${d.spec.id}:~$ `;
     if (o.id === 'macos') return `user@${d.spec.id} ~ % `;
-    if (o.id === 'agentic') return `agent> `;
+    if (o.id === 'agentic') return `agentd ${d.os.stage}> `;
     return `${d.spec.name}> `;
   };
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: tty, prompt: prompt() });

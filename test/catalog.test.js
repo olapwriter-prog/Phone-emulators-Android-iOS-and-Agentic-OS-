@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DEVICES, supportedOS, OS_REGISTRY, Device } from '../src/index.js';
 
 test('catalog covers every OS family', () => {
-  for (const os of Object.keys(OS_REGISTRY)) assert.ok(DEVICES.some(d => d.os === os), `no device ships ${os}`);
+  for (const os of Object.keys(OS_REGISTRY)) assert.ok(DEVICES.some(d => supportedOS(d).includes(os)), `no device runs ${os}`);
 });
 
 test('device ids are unique and specs are sane', () => {

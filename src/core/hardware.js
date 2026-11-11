@@ -67,7 +67,7 @@ export class Hardware {
 
   /**
    * Advance the hardware by dt seconds.
-   * load: { on, suspended, sleepFactor, cpu, npu, perfCap, display:{on,brightness,hz,aod}, cell, wifi, gps, bt, cellOn, wifiOn }
+   * load: { on, suspended, sleepFactor, cpu, npu, extraW, perfCap, display:{on,brightness,hz,aod}, cell, wifi, gps, bt, cellOn, wifiOn }
    * policy: { chargeLimit, allowCharge }
    * Returns { depleted, overheated }.
    */
@@ -107,6 +107,7 @@ export class Hardware {
           displayW = 0.03;
         }
         if (this.spec.cooling === 'fan') baseW += 1.5 * th.fan;
+        baseW += load.extraW || 0; // torch, vibration motor, speaker…
         // Neural engine: ~0.35 W per 10 tokens/s of rated throughput at full tilt.
         npuW = clamp(load.npu || 0) * (soc.npuTps / 10) * 0.35 * th.throttle;
       }

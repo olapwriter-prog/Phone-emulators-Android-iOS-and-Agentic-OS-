@@ -1,7 +1,8 @@
 # phonesim: virtual phones (and Macs) with real OS behaviour
 
-`phonesim` simulates **52 device models** running **Android, iOS, Linux, macOS and
-an Agentic OS**. Each simulator combines three parts:
+`phonesim` simulates **56 device models** running **Android, iOS, Linux, macOS and
+[agenticOS](https://github.com/olapwriter-prog/agenticOS)**, the headless phone OS run by
+`agentd`. Each simulator combines three parts:
 
 1. **A hardware model** taken from the device's spec: SoC performance and power
    curve, RAM, display size, refresh rate and panel type, battery capacity,
@@ -11,17 +12,18 @@ an Agentic OS**. Each simulator combines three parts:
 2. **An OS layer** that reproduces how each platform manages power, memory,
    background work, security and thermals.
 3. **A shell** that matches the platform: `adb shell` on Android, host tools on
-   iOS, bash/sysfs/systemctl on Linux, zsh/pmset on macOS, and an agent CLI on
-   Agentic OS.
+   iOS, bash/sysfs/systemctl on Linux, zsh/pmset on macOS, and `agentd ctl` on
+   agenticOS.
 
 You can drive the same engine from a CLI, a browser UI, or as a library. It has
 no dependencies and needs Node 18 or later.
 
 ```bash
-npm test                                   # 44 behaviour tests
+npm test                                   # 50 behaviour tests
 node bin/phonesim.js list                  # the catalog
 node bin/phonesim.js info galaxy-z-fold6
 node bin/phonesim.js shell pixel-9         # interactive device
+node bin/phonesim.js shell oneplus-6 --os agentic   # agenticOS: agentd ctl
 node bin/phonesim.js bench video           # every model, same scenario
 npm start                                  # web UI on http://localhost:8080
 ```
@@ -38,49 +40,93 @@ npm start                                  # web UI on http://localhost:8080
 | OS | Models |
 |---|---|
 | **iOS** | iPhone SE (3rd gen), 12, 13, 14, 14 Pro, 15, 15 Pro, 15 Pro Max, 16, 16 Pro, 16 Pro Max, 17, Air, 17 Pro, 17 Pro Max |
-| **Android** | Pixel 6, 7, 8, 8a, 8 Pro, 9, 9 Pro XL, 10, 10 Pro · Galaxy S23, S24, S24 Ultra, S25, S25 Ultra, A55, Z Fold6, Z Flip6 · OnePlus 12, 13 · Xiaomi 14 · Redmi Note 13 · Nothing Phone (2) · Fairphone 5 |
+| **Android** | Pixel 6, 7, 8, 8a, 8 Pro, 9, 9 Pro XL, 10, 10 Pro · Galaxy S23, S24, S24 Ultra, S25, S25 Ultra, A55, Z Fold6, Z Flip6 · OnePlus 12, 13 · Xiaomi 14 · Redmi Note 13 · Nothing Phone (2) · Fairphone 5 · (stock Android on) OnePlus 6, 6T, Pocophone F1, Fairphone 4, Galaxy A3/A5 (2015) |
 | **Linux** | PinePhone, PinePhone Pro (postmarketOS), Librem 5 (PureOS), Volla Phone X23 (Ubuntu Touch); also as an alternative OS on Pixel 6, Fairphone 5 and Apple-silicon Macs (Asahi) |
 | **macOS** | MacBook Air 13" M2/M3, 15" M3 · MacBook Pro 14" M3 Pro, 16" M3 Max · iMac 24" M3 · Mac mini M4 · Mac Studio M2 Max |
-| **Agentic OS** | Agentic One and Agentic Pocket (hypothetical reference designs); also runs on every Android phone and the Volla X23 |
+| **agenticOS** | The phones agenticOS's install guide names as well supported by postmarketOS with working modem, calls and SMS: PinePhone, PinePhone Pro, OnePlus 6, OnePlus 6T, Pocophone F1, Fairphone 4, Fairphone 5, Galaxy A3 (2015), Galaxy A5 (2015); plus Librem 5 (ModemManager, as on Mobian). Not offered where it would need an oFono backend (Volla / Ubuntu Touch) or where postmarketOS has no working modem (Pixels, Galaxy S) |
 
 To add a model, add one line to `src/devices/catalog.js`.
 
 ## What each OS simulates
 
-| | Android | iOS | Linux | macOS | Agentic OS |
-|---|---|---|---|---|---|
-| Boot chain | AVB → init → zygote → system_server | SecureROM → iBoot → XNU → launchd → SpringBoard | U-Boot/GRUB → kernel → systemd | iBoot → XNU → FileVault → loginwindow | measured boot → capability broker → **model load** |
-| Background apps | cached + frozen after 10 s; foreground services keep running | suspended after 5 s; audio, navigation and VoIP keep running | **keep running** (no freezer) | App Nap for hidden idle apps | skills are headless and task-scoped |
-| Memory pressure | lmkd kills by `oom_score_adj` | jetsam kills suspended apps by LRU; per-app limit | kernel OOM killer kills the largest process | compressor + swap, **never kills**; "out of application memory" warning | evicts idle skills, then the **model** (reloads on demand) |
-| Idle / sleep | Doze: INACTIVE → LIGHT_IDLE → … → IDLE (needs stillness), maintenance windows, deferred FCM | idle sleep; Background App Refresh | logind idle suspend (s2idle); only the modem can wake it | display sleep → system sleep, lid/clamshell, Power Nap, `caffeinate` | sleeps waiting for the wake word; wakes for tasks |
-| Low battery | Battery Saver at 15%, off at 90% | Low Power Mode prompt at 20%/10%, off at 80% | UPower warning, poweroff at 2% | Low Power Mode, hibernate at 3% | governor defers low-priority tasks |
-| Charging | Pixel adaptive charging (80% hold) | Optimized Charging (80%), limit of 80–100% | full charge | Optimized Charging | full charge |
-| Thermal | Thermal HAL levels NONE…SHUTDOWN; brightness cap; kills heavy app at EMERGENCY | thermalState; **"needs to cool down"** screen | kernel trip points; critical shutdown | fan curve, SMC emergency shutdown | halves local inference; offloads to cloud only if allowed |
-| Security | PIN required after boot and every 72 h; 30 s lockouts | Face/Touch ID needs passcode after restart and 48 h; lockout 1 m → 5 m → 15 m → 1 h → unavailable | pam_faillock (3 tries, 10 min); hardware kill switches | Touch ID + FileVault, TCC prompts | human approval for sensitive actions; task-scoped grants; audit log |
+| | Android | iOS | Linux | macOS |
+|---|---|---|---|---|
+| Boot chain | AVB → init → zygote → system_server | SecureROM → iBoot → XNU → launchd → SpringBoard | U-Boot/GRUB → kernel → systemd | iBoot → XNU → FileVault → loginwindow |
+| Background apps | cached + frozen after 10 s; foreground services keep running | suspended after 5 s; audio, navigation and VoIP keep running | **keep running** (no freezer) | App Nap for hidden idle apps |
+| Memory pressure | lmkd kills by `oom_score_adj` | jetsam kills suspended apps by LRU; per-app limit | kernel OOM killer kills the largest process | compressor + swap, **never kills**; "out of application memory" warning |
+| Idle / sleep | Doze: INACTIVE → LIGHT_IDLE → … → IDLE (needs stillness), maintenance windows, deferred FCM | idle sleep; Background App Refresh | logind idle suspend (s2idle); only the modem can wake it | display sleep → system sleep, lid/clamshell, Power Nap, `caffeinate` |
+| Low battery | Battery Saver at 15%, off at 90% | Low Power Mode prompt at 20%/10%, off at 80% | UPower warning, poweroff at 2% | Low Power Mode, hibernate at 3% |
+| Charging | Pixel adaptive charging (80% hold) | Optimized Charging (80%), limit of 80–100% | full charge | Optimized Charging |
+| Thermal | Thermal HAL levels NONE…SHUTDOWN; brightness cap; kills heavy app at EMERGENCY | thermalState; **"needs to cool down"** screen | kernel trip points; critical shutdown | fan curve, SMC emergency shutdown |
+| Security | PIN required after boot and every 72 h; 30 s lockouts | Face/Touch ID needs passcode after restart and 48 h; lockout 1 m → 5 m → 15 m → 1 h → unavailable | pam_faillock (3 tries, 10 min); hardware kill switches | Touch ID + FileVault, TCC prompts |
 
-### Agentic OS
+### agenticOS (github.com/olapwriter-prog/agenticOS)
 
-The interface is an agent, not an app grid. A goal is split into clauses on
-"then", and each clause is planned into **inference** steps and **tool calls**.
+Your OS, simulated from its source. It is postmarketOS with no UI plus one daemon,
+`agentd`, that *is* the phone. There is no app grid and no screen to tap. The shell is
+`agentd ctl`, and anything that isn't a ctl command is sent as `chat`.
 
-- Inference runs on the NPU, or falls back to the CPU at a much higher power
-  cost. The model size depends on RAM (1B / 3B / 8B).
-- Sensitive tools (`messages.send`, `payments.authorize`, `phone.call`,
-  `files.delete`, …) wait for approval, which only works while unlocked. A task
-  waiting for approval is parked and doesn't block the queue.
-- Grants last only for the task and are revoked when it ends. Every tool call is
-  written to an audit log.
-- An energy and thermal governor defers low-priority work on low battery and
-  pauses or slows inference when hot. Cloud offload happens only when the task's
-  privacy policy allows it.
+**Ported from the Rust (same logic and constants):**
+
+| Crate | Behaviour in the simulator |
+|---|---|
+| `stage`, `power`, `kerneld` | Asleep / Active / Deep / WindingDown. Chat wakes it, 120 s idle puts it to sleep, the charger (≥20%) brings Deep, power loss winds down. Every change goes to the ledger, background slices are frozen unless Deep, and the governor is powersave / schedutil / performance (powersave at ≤15% off the charger) |
+| `intents` | the phrase table (`call {to}`, `text {to} {text}`, `weather in {place}`, … ~120 phrases), matched exactly as `Intent::try_match` does |
+| `understand` + `agentd/qa.rs` | the weighted Naive Bayes classifier with the **same seed phrasings**, threshold 0.6, and the detail rules (contacts by name, a typo away or "mother", on/off, volume, message text). Data questions ("how many texts did Mum send me") are answered by code, with no LLM. Your `HELD_OUT` test questions: 8/8 |
+| `executor`, `gateway`, `gate` | Low/Medium tools run; High tools (`call`, `send_sms`, `send_message`, `pay`, `reply`, `buy`, `book`, `file_gst`, `install_function`, …) queue. A volume-down hold of 2000 ms or more approves the **one** waiting action. With two waiting it approves neither ("use press N"). A short press does nothing. A grant lasts 10 minutes and runs once. Pending items expire after 10 minutes, at most 20 |
+| `notify` | quiet hours 22:00–07:00, daily budget 5, calls and VIPs always ring, everything else held for `digest` |
+| `ledger` | SHA-256 hash chain, byte-compatible line hashes. `ledger tamper N` then `ledger verify` shows the break |
+| `learn` | approvals (+1), declines (−1), "that was right/wrong", corrections. Approved or corrected requests become shortcuts, and the classifier retrains on them |
+| `models`, `prio`, `agentd` | models chosen from RAM per your `agentd.toml` comments (≥12 GB: Qwen3.5-4B + 9B; >4 GB: 4B; else Qwen2.5-0.5B). The small model is always loaded; the large one is loaded on the charger at ≥30%. The 897-token system prompt is read once (warm-up), one core is kept for calls, and the boost is dropped above 80 °C and restored below 70 °C |
+| trainer conditions | charger, ≥50% battery, below `cool_c`, Deep stage, ≥20 new confirmed requests or nightly due |
+
+**Simulated, not real:** the LLM's choice (no weights run; it picks a tool the
+way the grammar forces: one registered call) and its latency. Latency comes from
+`agentos-llm`'s measured speeds in PROGRESS.md (Qwen3.5-4B: ~10 tok/s answering,
+~17 tok/s reading the prompt, on an M-series CPU), scaled to each phone's chip and
+ARM kernel (i8mm, SDOT, or portable code on Cortex-A53). The modem and the outside
+services are simulated too.
+
+**Two things the simulator found in agentd as it is today:**
+
+1. **The phone never suspends.** `kerneld::may_suspend()` exists, but nothing in
+   agentd acts on it. Over 24 h of standby a OnePlus 6 uses ~40% under agenticOS
+   against ~8% under stock Android's Doze, and a PinePhone uses ~80%
+   (`phonesim scenario standby oneplus-6 --os agentic`).
+2. **Nightly training stops a second after it starts.** `train_tick` calls
+   `trainer.started_on(today)`. On the next tick `nightly_due` is false, because
+   `last_day` is now today. With fewer than `train_min_new` (20) new confirmed
+   requests, `blocker()` returns a reason, and the running job is stopped:
+   "training stopped (1 new confirmed requests since the last run (needs 20))".
+   `phonesim scenario overnight oneplus-6 --os agentic` reproduces it. One possible
+   fix is to skip the `min_new` check for a run that is already going, or to set
+   `last_day` when the run finishes.
 
 ```
-agent> agent run "summarize the news, then email it to Alex"
-agent> agent run "clean up old screenshots" --low
-agent> agent tasks
-agent> agent approve 1
-agent> audit
+$ node bin/phonesim.js shell oneplus-6 --os agentic
+agentd Asleep> save Mum as +919876543210
+done: saved Mum: +919876543210 [intent]
+agentd Active> call mum
+not done: approval required (id 1): press the approval key on the phone, then ask again [intent]
+agentd Active> :key 300
+key held 300 ms (< 2000 ms): nothing approved
+agentd Active> :key
+approved #1 call
+agentd Active> call mum
+done: calling Mum (+919876543210) [intent]
+agentd Active> sim-sms +919876543210|dinner at 8?
+agentd Active> how many texts did Mum send me
+answer: Mum sent you 1 text.
+agentd Active> how is the network
+done: operator Airtel, signal 80%, ... [model, 29.0 s]
+agentd Active> ledger verify
+ledger ok: 21 lines, head d14ee2e478b5db7e…
 ```
+
+Other commands: `pending`, `press N`, `decline N`, `phone`, `models`, `prio`,
+`power 80 charger`, `notify app|sender|priority|text`, `sim-call NUMBER`,
+`sim-caller-hangup`, `digest`, `learn`, `train [now]`, `ledger [verify|tamper N]`,
+`tools` (every tool with its tier), `set ui on` (agentos-ui screen), `state`.
 
 ## Using the CLI shell
 
@@ -119,7 +165,8 @@ runs it on every model and prints a table.
 | `gaming` | 30 min of a heavy 3D game: frame rate over time, peak temperature, throttling |
 | `charge` | minutes to 50/80/100% with the fastest supported charger, and charge-limit holds |
 | `memory` | opens every app; what gets killed, frozen or swapped |
-| `agent` | Agentic OS task flow, approvals and NPU power |
+| `agent` | agenticOS: model warm-up, phrase / classifier / code / LLM routing, the approval key, the ledger |
+| `overnight` | agenticOS: a night on the charger: Deep stage, quiet hours, digest, nightly training |
 
 Sample output (`bench video` and `bench charge`):
 
@@ -130,7 +177,6 @@ pixel-10-pro           android  20.42      pixel-10           android  31       
 galaxy-s25-ultra       android  20.53      oneplus-13         android  11           21           false
 pinephone              linux     3.58      macbook-air-13-m3  macos    37           69           true
 macbook-pro-16-m3-max  macos    16.95
-agentic-one            agentic  22.03
 ```
 
 ## Web UI
@@ -139,8 +185,8 @@ agentic-one            agentic  22.03
 
 - a device frame drawn to the real screen proportions and cutout (notch, Dynamic
   Island, punch-hole, home button, laptop or desktop);
-- the boot sequence, lock screen and home grid, plus the agent surface on
-  Agentic OS;
+- the boot sequence, lock screen and home grid; on agenticOS, `agentd`'s status
+  line, conversation, pending approvals and a "Hold volume-down" key;
 - live meters for battery, power, temperature, throttling, frame rate, memory,
   Doze, swap, fan and NPU, with a history chart;
 - environment controls (charger, ambient temperature, light, signal, Wi-Fi,
@@ -173,8 +219,9 @@ runScenario('gaming', 'galaxy-s25');
 src/core/hardware.js   battery, thermal RC model, CPU capacity/throttle, power breakdown
 src/core/os-base.js    shared lifecycle, lock and unlock, apps, permissions, notifications, shell
 src/core/device.js     hardware + OS + environment, simulation clock, chargers, fold
-src/os/*.js            android, ios, linux, macos, agentic behaviour
-src/devices/catalog.js the 52 models
+src/os/*.js            android, ios, linux, macos, agentic (agentd) behaviour
+src/os/agentos/        ports of agenticOS crates: understand + qa seeds, intents, ledger
+src/devices/catalog.js the 56 models
 src/scenarios.js       repeatable scenarios
 bin/phonesim.js        CLI
 web/                   browser UI

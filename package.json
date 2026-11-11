@@ -1,0 +1,15 @@
+{
+  "name": "phonesim",
+  "version": "0.1.0",
+  "description": "Behavioural simulators for virtual phones and computers: hardware models plus Android, iOS, Linux, macOS and Agentic OS behaviour.",
+  "type": "module",
+  "license": "MIT",
+  "bin": { "phonesim": "bin/phonesim.js" },
+  "exports": { ".": "./src/index.js" },
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "test": "node --test test/*.test.js",
+    "sim": "node bin/phonesim.js"
+  },
+  "engines": { "node": ">=18" }
+}

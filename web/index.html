@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phone Simulator</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>phonesim</h1>
+    <label>Device <select id="device"></select></label>
+    <label>OS <select id="os"></select></label>
+    <label>Speed <select id="speed">
+      <option value="1">1×</option><option value="10" selected>10×</option><option value="60">60×</option>
+      <option value="600">600×</option><option value="3600">3600×</option>
+    </select></label>
+    <button id="pause" type="button">Pause</button>
+    <span id="clock" class="muted"></span>
+  </header>
+
+  <main class="layout">
+    <section class="stage">
+      <div id="frame" class="frame">
+        <div id="screen" class="screen"></div>
+      </div>
+      <div class="hwbuttons">
+        <button data-act="power" type="button">⏻ Power</button>
+        <button data-act="unlock-bio" type="button" id="bioBtn">Biometric</button>
+        <button data-act="unlock-pin" type="button">PIN 0000</button>
+        <button data-act="home" type="button">Home</button>
+        <button data-act="fold" type="button" id="foldBtn" hidden>Fold</button>
+        <button data-act="lid" type="button" id="lidBtn" hidden>Close lid</button>
+      </div>
+      <p id="spec" class="spec muted"></p>
+    </section>
+
+    <section class="panel">
+      <div class="card">
+        <h2>Live hardware</h2>
+        <div class="metrics" id="metrics"></div>
+        <canvas id="chart" width="560" height="120" aria-label="battery and temperature history"></canvas>
+        <p class="legend"><span class="sw bat"></span>battery % <span class="sw tmp"></span>temperature °C <span class="sw pwr"></span>power W</p>
+      </div>
+
+      <div class="card">
+        <h2>Environment & power</h2>
+        <div class="grid2">
+          <label>Charger <select id="charger"><option value="">unplugged</option></select></label>
+          <label>Ambient °C <input id="ambient" type="range" min="-10" max="45" value="22"><output></output></label>
+          <label>Light (lux) <input id="lux" type="range" min="0" max="5" step="0.1" value="2.5"><output></output></label>
+          <label>Signal <input id="signal" type="range" min="0" max="1" step="0.05" value="0.8"><output></output></label>
+          <label><input id="wifi" type="checkbox" checked> Wi-Fi available</label>
+          <label><input id="moving" type="checkbox"> Moving</label>
+          <label><input id="sun" type="checkbox"> In direct sun</label>
+          <label><input id="lowpower" type="checkbox"> Low power mode</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Shell <span class="muted" id="shellHint"></span></h2>
+        <pre id="term" class="term" tabindex="0"></pre>
+        <form id="shellForm"><input id="shellIn" autocomplete="off" spellcheck="false" placeholder="type a command, e.g. help"></form>
+      </div>
+
+      <div class="card">
+        <h2>System log</h2>
+        <pre id="log" class="log"></pre>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/web/app.js"></script>
+</body>
+</html>
